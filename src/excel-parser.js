@@ -30,23 +30,30 @@ workbook.xlsx.readFile(excelFilePath)
             return new Promise((resolve) => {
                 http.getSuggestDataByGroupName(groupName).then(
                     (resp) => {
-                        const entities = resp.data.entities;
-                        if (entities.length) {
-                            const artistId = entities.find((val) => {
-                                return val.hasOwnProperty('type') && val.type === 'artist' && val.results && val.results.length
-                            }).results[0].artist.id;
-
+                        const artists = resp.data.artists.items;
+                        if (artists.length) {
+                            const artist = artists[0]
+                            const artistId = artist.id;
                             http.getArtistDataById(artistId).then((resp) => {
-                                addRowToArtistWorksheet(resp);
+                                const artistName = artist.name;
+                                addArtistToWorksheet(resp);
                                 http.getAlbumsIdsByArtistId(artistId).then((albumIds) => {
                                     Promise.all(
                                         albumIds.map((albumId) => {
-                                            http.getAlbumDataById(albumId).then((resp) => {
-                                                addRowToAlbumsWorksheet(artistId, albumId, resp);
+                                            return new Promise((res, rej) => {
+                                                http.getAlbumDataById(albumId).then((resp) => {
+                                                    addAlbumToWorksheet(artistId, artistName, albumId, resp);
+                                                }).then(() => {
+                                                    res();
+                                                }).catch((e) => {
+                                                    console.error(e);
+                                                });
                                             })
                                         })
                                     ).then(() => {
                                         resolve();
+                                    }).catch((e) => {
+                                        console.error(e);
                                     })
                                 })
                             });
@@ -54,7 +61,9 @@ workbook.xlsx.readFile(excelFilePath)
                         else {
                             resolve();
                         }
-                })
+                    }).catch((e) => {
+                        console.error(e);
+                    })
             });
         }))
     })
@@ -77,18 +86,18 @@ const getSimilarSocialCounters = (socialCountersObj) => {
 
 
 const getSimilarFromArtistData = (artistData) => {
-    return artistData.similar.map((similarObj) => similarObj.name).join(customSeparator);
+    return artistData.similar ? artistData.similar.map((similarObj) => similarObj.name).join(customSeparator) : '';
 }
 
 const setArtistWorksheetColumns = () => {
     artistsWorksheet.columns = [
         { header: 'Id', key: 'id' },
         { header: 'Name', key: 'name' },
-        { header: 'SimilarArtists.', key: 'similarArtists' },
-        { header: 'Info.', key: 'artistInfo' },
-        { header: 'Tags.', key: 'artistTags' },
-        { header: 'Country.', key: 'artistCountry' },
-        { header: 'SocialCounters.', key: 'artistSocialCounters' }
+        { header: 'SimilarArtists', key: 'similarArtists' },
+        { header: 'Info', key: 'artistInfo' },
+        { header: 'Tags', key: 'artistTags' },
+        { header: 'Country', key: 'artistCountry' },
+        { header: 'SocialCounters', key: 'artistSocialCounters' }
     ];
 }
 
@@ -97,9 +106,10 @@ const setAlbumsWorksheetColumns = () => {
     albumsWorksheet.columns = [
         { header: 'ArtistId', key: 'artistId' },
         { header: 'Id', key: 'id' },
+        { header: 'ArtistName', key: 'artistName' },
         { header: 'Name', key: 'name' },
         { header: 'ReleaseDate', key: 'releaseDate' },
-        { header: 'Label.', key: 'label' }
+        { header: 'Labels', key: 'labels' }
     ];
 }
 
@@ -108,21 +118,23 @@ const setTracksWorksheetColumns = () => {
         { header: 'Id', key: 'id' },
         { header: 'Name', key: 'name' },
         { header: 'AlbumId', key: 'albumId' },
-        { header: 'ArtistId', key: 'artistId' }
+        { header: 'ArtistId', key: 'artistId' },
+        { header: 'AlbumName', key: 'albumName' },
+        { header: 'ArtistName', key: 'artistName' }
     ];
 }
 
-const addRowToArtistWorksheet = (resp) => {
+const addArtistToWorksheet = (resp) => {
     const respData = resp.data;
     const artistData = respData.artist;
 
     const id = artistData.id
     const name = artistData.name;
     const similarArtists = getSimilarFromArtistData(respData);
-    const artistInfo = artistData.description.text;
-    const artistTags = artistData.genres.join(customSeparator);
-    const artistCountry = artistData.countries.join(customSeparator);
-    const artistSocialCounters = getSimilarSocialCounters(respData.socialCounters);
+    const artistInfo = artistData.description ? artistData.description.text : '';
+    const artistTags = artistData.genres ? artistData.genres.join(customSeparator) : '';
+    const artistCountry = artistData.countries ? artistData.countries.join(customSeparator) : '';
+    const artistSocialCounters = respData.socialCounters ? getSimilarSocialCounters(respData.socialCounters) : '';
 
     artistsWorksheet.addRow({
         id,
@@ -135,28 +147,32 @@ const addRowToArtistWorksheet = (resp) => {
     });
 }
 
-const addRowToAlbumsWorksheet = (artistId, albumId, resp) => {
+const addAlbumToWorksheet = (artistId, artistName, albumId, resp) => {
     const respData = resp.data;
+    const name = respData.title || '';
 
     albumsWorksheet.addRow({
         artistId,
         id: albumId,
-        name: respData.title,
-        releaseDate : respData.releaseDate,
-        labels: respData.labels.map((labelObj) => labelObj.name).join(customSeparator),
+        artistName,
+        name,
+        releaseDate: respData.releaseDate ? respData.releaseDate : respData.year,
+        labels: respData.labels ? respData.labels.map((labelObj) => labelObj.name).join(customSeparator) : '',
     });
 
-    addTracksToWorksheet(respData.volumes, artistId, albumId);
+    addTracksToWorksheet(respData.volumes[0], artistId, albumId, artistName, name);
 
 }
 
-const addTracksToWorksheet = (tracksArr, artistId, albumId) => {
+const addTracksToWorksheet = (tracksArr, artistId, albumId, artistName, albumName) => {
     tracksArr.map((trackObj) => {
         tracksWorksheet.addRow({
             id: trackObj.id,
             name: trackObj.title,
-            albumId : albumId,
-            artistId: artistId
+            albumId,
+            artistId,
+            artistName,
+            albumName
         });
     })
 }

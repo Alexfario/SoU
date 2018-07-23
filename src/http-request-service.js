@@ -1,24 +1,14 @@
 const axios = require('axios');
 
 const yandexHelper = require('./yandex-helper');
-const userConfig = require('./user-config');
 
-const sign = userConfig.sign;
-const cookie = userConfig.cookie;
-
-
-const yandexSuggestUrl = yandexHelper.suggestUrl;
 
 const getSuggestDataByGroupName = (groupName) => {
-  const suggestRequestBody = yandexHelper.buildSuggestRequestBody(groupName, sign);
+  const searchUrl = yandexHelper.buildSearchUrl(groupName);
 
   return axios({
-    method: 'post',
-    url: yandexSuggestUrl,
-    data: suggestRequestBody,
-    headers: {
-      Cookie: cookie
-    }
+    method: 'get',
+    url: searchUrl,
   });
 }
 
